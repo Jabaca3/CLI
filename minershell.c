@@ -42,6 +42,7 @@ char **tokenize(char *line){
 }
 
 
+
 int main(int argc, char *argv[]){
 	char line[MAX_INPUT_SIZE];
 	char **tokens;
@@ -58,11 +59,13 @@ int main(int argc, char *argv[]){
 		line[strlen(line)] = '\n'; //terminate with new line
 		tokens = tokenize(line);
 
+
+		// If no tokens found we dont execute anything
 		if(*tokens == NULL){
 			//pass
 		}
 		
-
+		
 		// Testing for user input "cd"
 		// This changes the current directory of this process
 		else if(strcmp(*tokens, "cd")==0){
@@ -71,30 +74,54 @@ int main(int argc, char *argv[]){
 			}
 		}
 
+
+
 		// Testing for user input "exit"
 		// This exits the main program for this process
 		else if (strcmp(*tokens, "exit") == 0 ){
 			printf("%s", "Thank you, now exiting program\n");
 			exit(0);
 		}
+		
+
+
+
 
 		// Checking user input for various commands that may exist
 		else if(*tokens){
 
-		
+		// Searching for | boolean value piping to determin if we are piping later
+			char **index = tokens;
+				int piping = 0;	
+				while( *index != 0 ){
+					if( strcmp(*index, "|") ==0 ){
+						printf("%s", "Piping...\n");
+						piping = 1;
+						break;
+					}
+					index++;
+				}
 
+			int fd[2];
+			if(piping && pipe(fd) == -1){
+				char error_message[30] = "Anerrorhasoccurred\n";
+				printf("%s", "were erroring here");
+				write(STDERR_FILENO,error_message,strlen(error_message));
+			}
+
+
+
+//----------------------------------------------Creating child proces---------------------------------------------------
 			int rc = fork();
+			// If child process fails exit
 			if (rc < 0){ 
-				// fork failed; exit
 				fprintf(stderr, "fork failed\n");
 				exit(1);
 			}
 
-			// child (new process)
+			// Child (new process) if it exist
 			else if (rc == 0){
 
-
-				//switching to dupping mode
 				//Counting tokens
     			int count = 0;
 				char **clone = tokens;
@@ -103,13 +130,28 @@ int main(int argc, char *argv[]){
         			count += 1;
 				}
 
+// Handeling piping here ------------------------------------------
+
+				if(piping){
+					dup2(fd[1], STDOUT_FILENO);
+					close(fd[0]);
+					close(fd[1]);
+					execlp(tokens[0], tokens[0], (char *)NULL);
+				}
+
+// Handeling piping here ------------------------------------------
+
+				// Switching to dupping mode
 				// Changing outputs by detecting > argument
-				if(count >= 2 && tokens[count-2] && strcmp(tokens[count-2], ">") == 0){
+				// Taking in amount of flags (Not dynamic)
+
+				if(!piping && count >= 2 && tokens[count-2] && strcmp(tokens[count-2], ">") == 0){
 					printf("%s", "Duplicating\n");
 					int fw = open(tokens[count-1],  O_WRONLY | O_CREAT | O_TRUNC);
 					dup2(fw, STDOUT_FILENO);
 					dup2(fw, STDERR_FILENO);
 
+					// Specific for echo because echo has different properties than other commands
 					if(strcmp(*tokens, "echo")==0){
 						char *pointer = line+5;
 						execlp(*tokens, *tokens, tokens[1], (char *)NULL);
@@ -130,19 +172,41 @@ int main(int argc, char *argv[]){
 				}
 			
 
-				else if(strcmp(*tokens, "echo")==0){
+				// Specific for echo because echo has different properties than other commands
+				else if(!piping && strcmp(*tokens, "echo")==0){
 					char *pointer = line+5;
 					execlp(*tokens, *tokens, pointer, (char *)NULL);
 				}
-				else if(execlp(*tokens, *tokens, tokens[1], (char *)NULL) == -1){
+
+				// The standard execution for a single command
+				else if(!piping && execlp(*tokens, *tokens, tokens[1], (char *)NULL) == -1){
 					printf("%s", "Please enter a real command\n");
 				}
 				exit(0);
 			}
+			
 			else{
-			wait(NULL); /* reaping parent */
+				if(piping){
+					int child2 = fork();
+					if(child2 == 0){
+						dup2(fd[0], STDIN_FILENO);
+						close(fd[0]);
+						close(fd[1]);
+						if(execlp(tokens[2], tokens[2], (char *)NULL)==-1){
+							printf("%s", "Execlp broke or something");
+						}
+						exit(0);
+					}
+					else{
+						close(fd[0]);
+						close(fd[1]);
+						wait(NULL);
+					}
+				}
+				wait(NULL);
 			}
 		}
+//----------------------------------------------Ending processes---------------------------------------------------
 
 		// Freeing the allocated memory
 		for (i = 0; tokens[i] != NULL; i++){
